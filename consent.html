@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Elyssa OS · sign in</title>
+<style>
+  :root { --bg: #f6f4ef; --fg: #1d1c1a; --muted: #6b6760; --card: #fffdf8; --line: #e2ded5; --accent: #2b5f4d; --accent-fg: #fff; --danger: #9a3b2d; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15161a; --fg: #ebe8e1; --muted: #9d998f; --card: #1e2026; --line: #2d3038; --accent: #5fa88f; --accent-fg: #0f1a15; --danger: #e07a6a; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 26rem; margin: 0 auto; padding: max(1.5rem, env(safe-area-inset-top)) 1rem 3rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 1.5rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.25rem; }
+  .row { display: flex; justify-content: space-between; gap: 1rem; padding: .5rem 0; border-top: 1px solid var(--line); font-size: .95rem; }
+  .row:first-child { border-top: 0; padding-top: 0; }
+  .row b { font-weight: 600; }
+  .row span { color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+  label { display: block; font-size: .9rem; color: var(--muted); margin: .9rem 0 .3rem; }
+  input { width: 100%; font: inherit; font-size: 16px; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; font-size: 1rem; font-weight: 600; width: 100%; padding: .8rem 1rem; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; margin-top: .75rem; min-height: 44px; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+  button:disabled { opacity: .55; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .actions { display: flex; gap: .75rem; margin-top: 1rem; }
+  .actions button { margin-top: 0; }
+  .or { text-align: center; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; }
+  .msg { margin: 1rem 0 0; font-size: .95rem; }
+  .msg.err { color: var(--danger); }
+  .who { font-size: .9rem; color: var(--muted); margin-top: 1rem; }
+  .who a { color: inherit; }
+  .hidden { display: none; }
+  footer { margin-top: 1.5rem; font-size: .8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Elyssa OS</h1>
+  <p class="sub" id="sub">The household memory.</p>
+
+  <section class="card" id="loading"><p class="msg">Loading…</p></section>
+
+  <section class="card hidden" id="signin">
+    <p class="msg" style="margin-top:0">Sign in to continue. Only the household's accounts can.</p>
+    <button class="primary" id="google" type="button">Continue with Google</button>
+    <p class="or">or with email</p>
+    <form id="pw">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="username" required inputmode="email" autocapitalize="none" spellcheck="false">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit" id="pwbtn">Sign in</button>
+    </form>
+    <p class="msg err hidden" id="signin-err"></p>
+  </section>
+
+  <section class="card hidden" id="consent">
+    <p class="msg" style="margin-top:0"><b id="client-name"></b> wants to use Elyssa OS as you.</p>
+    <div class="row"><b>Sends you back to</b><span id="redirect-host"></span></div>
+    <div class="row"><b>Access</b><span id="scopes"></span></div>
+    <div class="actions">
+      <button type="button" id="deny">Deny</button>
+      <button type="button" class="primary" id="approve">Approve</button>
+    </div>
+    <p class="who">Signed in as <span id="who"></span> · <a href="#" id="signout">not you?</a></p>
+    <p class="msg err hidden" id="consent-err"></p>
+  </section>
+
+  <section class="card hidden" id="done"><p class="msg" id="done-msg"></p></section>
+
+  <footer>Approving lets that app read and write the household memory under your account, with the same rights you have. You can revoke it later by removing the connector.</footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.95.3/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
+<script>
+(function () {
+  var CONFIG = {"url":"https://vssciljnilrgqcrnandl.supabase.co","key":"sb_publishable_dxXwBfpQo6QAbdbX0Furag_wgmmBqp1"};
+  var KEY = 'eos.authorization_id';
+  var $ = function (id) { return document.getElementById(id); };
+  var show = function (id) { ['loading', 'signin', 'consent', 'done'].forEach(function (s) { $(s).classList.toggle('hidden', s !== id); }); };
+  var fail = function (where, text) { var el = $(where); el.textContent = text; el.classList.remove('hidden'); };
+  var finish = function (text) { $('done-msg').textContent = text; show('done'); };
+
+  if (!window.supabase) { show('done'); return finish('Could not load the sign-in library. Reload the page.'); }
+  var sb = window.supabase.createClient(CONFIG.url, CONFIG.key, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
+
+  // The authorization id arrives in the query; it is kept in sessionStorage across the
+  // Google round trip so the page comes back to the same authorization.
+  var params = new URLSearchParams(location.search);
+  var authId = params.get('authorization_id');
+  if (authId) { try { sessionStorage.setItem(KEY, authId); } catch (e) {} }
+  else { try { authId = sessionStorage.getItem(KEY); } catch (e) {} }
+  var selfUrl = location.origin + location.pathname;
+
+  function describe(details) {
+    $('client-name').textContent = (details.client && details.client.name) || 'An application';
+    var host = '';
+    try { host = new URL(details.redirect_uri).host; } catch (e) { host = details.redirect_uri || ''; }
+    $('redirect-host').textContent = host;
+    var scopes = String(details.scope || '').split(/\s+/).filter(Boolean);
+    var words = { email: 'your email address', openid: 'your identity', profile: 'your profile', phone: 'your phone number', offline_access: 'stay connected without signing in again' };
+    $('scopes').textContent = scopes.length ? scopes.map(function (s) { return words[s] || s; }).join(', ') : 'the household memory as you';
+  }
+
+  function consent(user) {
+    $('who').textContent = user.email || user.id;
+    if (!authId) {
+      show('done');
+      return finish('You are signed in, but this page was opened without an authorization request. Start again from the app that asked you to connect.');
+    }
+    show('loading');
+    sb.auth.oauth.getAuthorizationDetails(authId).then(function (res) {
+      if (res.error) { show('consent'); return fail('consent-err', 'This authorization request is no longer valid (' + res.error.message + '). Start again from the app.'); }
+      var d = res.data || {};
+      if (!d.authorization_id && d.redirect_url) { finish('Already approved. Returning you to the app…'); location.replace(d.redirect_url); return; }
+      describe(d);
+      show('consent');
+    });
+  }
+
+  function decide(approve) {
+    $('approve').disabled = $('deny').disabled = true;
+    var call = approve ? sb.auth.oauth.approveAuthorization(authId) : sb.auth.oauth.denyAuthorization(authId);
+    call.then(function (res) {
+      if (res.error || !res.data || !res.data.redirect_url) {
+        $('approve').disabled = $('deny').disabled = false;
+        return fail('consent-err', 'Could not ' + (approve ? 'approve' : 'deny') + ': ' + (res.error ? res.error.message : 'no redirect from the server'));
+      }
+      try { sessionStorage.removeItem(KEY); } catch (e) {}
+      finish(approve ? 'Approved. Returning you to the app…' : 'Denied. Returning you to the app…');
+      location.replace(res.data.redirect_url);
+    });
+  }
+
+  $('google').addEventListener('click', function () {
+    $('google').disabled = true;
+    sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: selfUrl } }).then(function (res) {
+      if (res.error) { $('google').disabled = false; fail('signin-err', res.error.message); }
+    });
+  });
+  $('pw').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    $('pwbtn').disabled = true;
+    $('signin-err').classList.add('hidden');
+    sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('password').value }).then(function (res) {
+      $('pwbtn').disabled = false;
+      if (res.error) return fail('signin-err', res.error.status === 400 ? 'That email and password did not match a household account.' : res.error.message);
+      $('password').value = '';
+      consent(res.data.user);
+    });
+  });
+  $('approve').addEventListener('click', function () { decide(true); });
+  $('deny').addEventListener('click', function () { decide(false); });
+  $('signout').addEventListener('click', function (ev) { ev.preventDefault(); sb.auth.signOut().then(function () { show('signin'); }); });
+
+  // Returning from Google: the ?code= in the URL is exchanged by detectSessionInUrl; wait for it.
+  var started = false;
+  function start(session) {
+    if (started) return; started = true;
+    if (params.get('error')) { show('signin'); fail('signin-err', params.get('error_description') || params.get('error')); return; }
+    if (session && session.user) consent(session.user); else show('signin');
+  }
+  sb.auth.onAuthStateChange(function (event, session) {
+    if (event === 'INITIAL_SESSION') start(session);
+    if (event === 'SIGNED_IN' && !started) start(session);
+  });
+  setTimeout(function () { if (!started) sb.auth.getSession().then(function (r) { start(r.data && r.data.session); }); }, 1500);
+})();
+</script>
+</body>
+</html>
